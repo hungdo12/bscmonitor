@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BSC Monitor — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --surface2: #0f1620;
+    --border: #1e2d40;
+    --accent: #00e5ff;
+    --accent2: #7c3aed;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse 50% 30% at 10% 10%, rgba(0,229,255,0.04) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  /* HEADER */
+  .topbar {
+    border-bottom: 1px solid var(--border);
+    padding: 0.9rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10,14,26,0.95);
+    backdrop-filter: blur(8px);
+  }
+  .topbar-left { display: flex; align-items: center; gap: 1rem; }
+  .app-name { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.2em; color: var(--accent); text-transform: uppercase; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 6px var(--success);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .token-badge {
+    background: rgba(0,229,255,0.1);
+    border: 1px solid rgba(0,229,255,0.25);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--accent);
+    padding: 0.2rem 0.6rem;
+    letter-spacing: 0.1em;
+  }
+  .topbar-right { display: flex; gap: 0.6rem; }
+  .btn-sm {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    padding: 0.35rem 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm.danger:hover { border-color: var(--error); color: var(--error); }
+
+  /* MAIN LAYOUT */
+  .main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+  /* STATS GRID */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1.25rem; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .stat-label { font-size: 0.68rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.4rem; }
+  .stat-value { font-family: var(--mono); font-size: 1.35rem; font-weight: 700; color: var(--text); line-height: 1; }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.success { color: var(--success); }
+  .stat-sub { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
+
+  /* LOG PANEL */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 0.8rem 1.1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-title { font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); }
+  .log-container {
+    height: 460px;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    background: var(--surface2);
+  }
+  .log-container::-webkit-scrollbar { width: 4px; }
+  .log-container::-webkit-scrollbar-track { background: transparent; }
+  .log-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .log-entry {
+    display: flex; gap: 0.75rem; align-items: flex-start;
+    padding: 0.3rem 1rem;
+    border-bottom: 1px solid rgba(30,45,64,0.4);
+    line-height: 1.5;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-time { color: var(--muted); flex-shrink: 0; font-size: 0.7rem; padding-top: 0.05rem; }
+  .log-msg { color: var(--text); flex: 1; word-break: break-all; }
+  .log-entry.success .log-msg { color: var(--success); }
+  .log-entry.error   .log-msg { color: var(--error); }
+  .log-entry.warning .log-msg { color: var(--warning); }
+  .log-entry.info    .log-msg { color: #94a3b8; }
+  .log-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 0.45rem; }
+  .log-entry.success .log-dot { background: var(--success); }
+  .log-entry.error   .log-dot { background: var(--error); }
+  .log-entry.warning .log-dot { background: var(--warning); }
+  .log-entry.info    .log-dot { background: var(--muted); }
+  .empty-log { text-align: center; color: var(--muted); font-size: 0.75rem; padding: 3rem; }
+
+  /* LAST SCAN INFO */
+  .scan-info {
+    padding: 0.6rem 1.1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-family: var(--mono);
+    display: flex; gap: 1.5rem;
+  }
+  .scan-info span { color: var(--text); }
+
+  @media (max-width: 640px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .topbar { padding: 0.75rem 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="status-dot" id="statusDot"></div>
+    <div class="app-name">BSC Monitor</div>
+    <div class="token-badge" id="tokenBadge">{{ config.symbol if config else 'TOKEN' }}</div>
+  </div>
+  <div class="topbar-right">
+    <button class="btn-sm" onclick="stopMonitor()">Stop</button>
+    <button class="btn-sm danger" onclick="resetMonitor()">Reset</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Tổng ví</div>
+      <div class="stat-value accent" id="statWallets">{{ stats.total_wallets }}</div>
+      <div class="stat-sub">đang theo dõi</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Vòng quét</div>
+      <div class="stat-value" id="statCycle">{{ stats.cycle }}</div>
+      <div class="stat-sub" id="statScanTime">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Cảnh báo</div>
+      <div class="stat-value success" id="statAlerts">{{ stats.alerts_total }}</div>
+      <div class="stat-sub">ví tăng số dư</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Lần quét cuối</div>
+      <div class="stat-value" id="statLastScan" style="font-size:0.85rem">{{ stats.last_scan or '--' }}</div>
+      <div class="stat-sub" id="statScanned">{{ stats.scanned }} ví đã quét</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">Live Log</div>
+      <div style="font-family:var(--mono);font-size:0.65rem;color:var(--muted)">auto-refresh 5s</div>
+    </div>
+    <div class="log-container" id="logContainer">
+      <div class="empty-log">Đang chờ dữ liệu...</div>
+    </div>
+    <div class="scan-info">
+      Interval: <span>{{ config.interval if config else '--' }}s</span>
+      Luồng: <span>{{ config.num_threads if config else '--' }}</span>
+      Contract: <span>{{ config.contract[:10] + '...' if config else '--' }}</span>
+    </div>
+  </div>
+</div>
+
+<script>
+let lastLogCount = 0;
+let autoScroll = true;
+
+const logContainer = document.getElementById('logContainer');
+logContainer.addEventListener('scroll', function() {
+  const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 40;
+  autoScroll = atBottom;
+});
+
+function renderLogs(logs) {
+  if (!logs || logs.length === 0) {
+    logContainer.innerHTML = '<div class="empty-log">Đang chờ vòng quét đầu tiên...</div>';
+    return;
+  }
+  if (logs.length === lastLogCount) return;
+  lastLogCount = logs.length;
+
+  const html = logs.slice().reverse().map(entry => `
+    <div class="log-entry ${entry.level}">
+      <div class="log-dot"></div>
+      <div class="log-time">${entry.time}</div>
+      <div class="log-msg">${entry.msg}</div>
+    </div>
+  `).join('');
+
+  logContainer.innerHTML = html;
+  if (autoScroll) logContainer.scrollTop = 0;
+}
+
+function updateStats(stats) {
+  document.getElementById('statCycle').textContent    = stats.cycle || 0;
+  document.getElementById('statAlerts').textContent   = stats.alerts_total || 0;
+  document.getElementById('statWallets').textContent  = stats.total_wallets || 0;
+  document.getElementById('statLastScan').textContent = stats.last_scan || '--';
+  document.getElementById('statScanned').textContent  = (stats.scanned || 0) + ' ví đã quét';
+  document.getElementById('statScanTime').textContent = stats.last_scan_time ? stats.last_scan_time + 's/vòng' : '--';
+}
+
+async function fetchData() {
+  try {
+    const resp = await fetch('/api/logs');
+    const data = await resp.json();
+    renderLogs(data.logs);
+    updateStats(data.stats);
+  } catch(e) {}
+}
+
+async function stopMonitor() {
+  if (!confirm('Dừng monitor?')) return;
+  await fetch('/stop', { method: 'POST' });
+  document.getElementById('statusDot').style.background = '#ef4444';
+  document.getElementById('statusDot').style.boxShadow = '0 0 6px #ef4444';
+  document.getElementById('statusDot').style.animation = 'none';
+}
+
+async function resetMonitor() {
+  if (!confirm('Reset toàn bộ cấu hình và quay về trang setup?')) return;
+  await fetch('/reset', { method: 'POST' });
+  window.location.href = '/';
+}
+
+fetchData();
+setInterval(fetchData, 5000);
+</script>
+</body>
+</html>
