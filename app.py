@@ -95,14 +95,21 @@ def get_token_info(contract_addr):
         log.error(f"get_token_info: {e}")
         return "TOKEN", 18
 
-def get_balance(wallet_addr, contract_addr, decimals):
-    try:
-        w3 = get_w3()
-        c  = w3.eth.contract(address=Web3.to_checksum_address(contract_addr), abi=BALANCE_ABI)
-        raw = c.functions.balanceOf(Web3.to_checksum_address(wallet_addr)).call()
-        return (wallet_addr, raw / (10 ** decimals))
-    except Exception:
-        return (wallet_addr, None)
+def get_balance(wallet_addr, contract_addr, decimals, retries=10):
+    for attempt in range(1, retries + 1):
+        try:
+            w3 = get_w3()
+            c  = w3.eth.contract(address=Web3.to_checksum_address(contract_addr), abi=BALANCE_ABI)
+            raw = c.functions.balanceOf(Web3.to_checksum_address(wallet_addr)).call()
+            return (wallet_addr, raw / (10 ** decimals))
+        except Exception as e:
+            if attempt < retries:
+                # Reset w3 để lần retry dùng RPC khác
+                if hasattr(_local, "w3"):
+                    del _local.w3
+                time.sleep(0.5)
+            else:
+                return (wallet_addr, None)
 
 def scan_all(wallets, contract_addr, decimals, num_threads=10):
     results = {}
@@ -130,7 +137,7 @@ def run_monitor_cycle():
     with state_lock:
         if not state["running"] or not state["config"]: return
         cfg      = state["config"]
-        snapshot = dict(state["snapshot"])   # baseline gốc, KHÔNG bao giờ tăng
+        snapshot = dict(state["snapshot"])
         idx      = state["wallet_index"]
 
     wallets     = cfg["wallets"]
@@ -150,8 +157,22 @@ def run_monitor_cycle():
     current = scan_all(wallets, contract, decimals, num_threads)
     elapsed = time.time() - t0
 
+    # Kiểm tra ví bị lỗi sau 10 lần retry
+    failed_wallets = [addr for addr in wallets if addr not in current]
+    if failed_wallets:
+        err_msg = (
+            f"⚠️ <b>RPC LỖI — Vòng #{cycle}</b>\n"
+            f"Đã retry 10 lần nhưng không quét được "
+            f"<b>{len(failed_wallets)} ví</b>:\n"
+            + "\n".join(f"  • <code>{a}</code>" for a in failed_wallets[:10])
+            + (f"\n  ... và {len(failed_wallets)-10} ví khác" if len(failed_wallets) > 10 else "")
+            + f"\n\n⚠️ Kết quả vòng này có thể thiếu sót!"
+        )
+        send_telegram(tg_token, tg_chat, err_msg)
+        add_log(f"⚠️ {len(failed_wallets)} ví lỗi RPC sau 10 lần retry", "warning")
+
     increased    = []
-    new_snapshot = dict(snapshot)  # copy baseline để cập nhật nếu cần
+    new_snapshot = dict(snapshot)
 
     for addr, new_bal in current.items():
         old_bal = snapshot.get(addr, 0.0)
@@ -160,12 +181,8 @@ def run_monitor_cycle():
         if diff > 0.0001:
             stt = idx.get(addr, "?")
             increased.append((stt, addr, old_bal, new_bal, diff))
-            # ❌ KHÔNG cập nhật new_snapshot[addr] = new_bal
-            # → baseline giữ nguyên giá trị lúc setup
 
         elif new_bal < old_bal:
-            # Số dư GIẢM xuống dưới baseline → cập nhật baseline xuống
-            # để tránh báo nhầm khi số dư phục hồi lại mức cũ
             new_snapshot[addr] = new_bal
 
     save_snapshot(new_snapshot)
@@ -198,7 +215,6 @@ def run_monitor_cycle():
         add_log(f"✅ {len(increased)} ví tăng — tổng +{total_usdt:,.4f} {symbol}", "success")
     else:
         add_log(f"Vòng #{cycle} xong ({elapsed:.1f}s) — không có ví nào tăng", "info")
-
 # ─── SCHEDULER ───────────────────────────────────────────────────────────────
 
 scheduler = BackgroundScheduler(daemon=True)
