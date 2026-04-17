@@ -130,7 +130,7 @@ def run_monitor_cycle():
     with state_lock:
         if not state["running"] or not state["config"]: return
         cfg      = state["config"]
-        snapshot = dict(state["snapshot"])
+        snapshot = dict(state["snapshot"])   # baseline gốc, KHÔNG bao giờ tăng
         idx      = state["wallet_index"]
 
     wallets     = cfg["wallets"]
@@ -151,16 +151,21 @@ def run_monitor_cycle():
     elapsed = time.time() - t0
 
     increased    = []
-    new_snapshot = dict(snapshot)
+    new_snapshot = dict(snapshot)  # copy baseline để cập nhật nếu cần
 
     for addr, new_bal in current.items():
         old_bal = snapshot.get(addr, 0.0)
         diff    = new_bal - old_bal
+
         if diff > 0.0001:
             stt = idx.get(addr, "?")
             increased.append((stt, addr, old_bal, new_bal, diff))
-            new_snapshot[addr] = new_bal
-        elif addr not in new_snapshot or new_bal < new_snapshot.get(addr, 0):
+            # ❌ KHÔNG cập nhật new_snapshot[addr] = new_bal
+            # → baseline giữ nguyên giá trị lúc setup
+
+        elif new_bal < old_bal:
+            # Số dư GIẢM xuống dưới baseline → cập nhật baseline xuống
+            # để tránh báo nhầm khi số dư phục hồi lại mức cũ
             new_snapshot[addr] = new_bal
 
     save_snapshot(new_snapshot)
