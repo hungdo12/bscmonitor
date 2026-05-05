@@ -4,7 +4,8 @@ BSC Token Balance Monitor — Web App
 Chạy trên Render free tier
 - Setup token + ví qua giao diện web
 - Quét số dư mỗi N giây dùng multi-thread
-- Báo Telegram khi số dư tăng kèm STT + tổng kết
+- Báo Telegram THỐNG KÊ TỔNG QUAN khi có ví tăng (gom nhóm theo mức tăng)
+- So sánh với snapshot BAN ĐẦU (mốc cố định)
 - Self-ping mỗi 5 phút để không bị Render sleep
 """
 
@@ -135,7 +136,8 @@ def send_telegram(token, chat_id, message):
 
 def run_monitor_cycle():
     with state_lock:
-        if not state["running"] or not state["config"]: return
+        if not state["running"] or not state["config"]:
+            return
         cfg      = state["config"]
         snapshot = dict(state["snapshot"])
         idx      = state["wallet_index"]
@@ -157,20 +159,18 @@ def run_monitor_cycle():
     current = scan_all(wallets, contract, decimals, num_threads)
     elapsed = time.time() - t0
 
-    # Kiểm tra ví bị lỗi sau 10 lần retry
+    # Báo lỗi RPC nếu có ví không quét được
     failed_wallets = [addr for addr in wallets if addr not in current]
     if failed_wallets:
         err_msg = (
             f"⚠️ <b>RPC LỖI — Vòng #{cycle}</b>\n"
-            f"Đã retry 10 lần nhưng không quét được "
-            f"<b>{len(failed_wallets)} ví</b>:\n"
-            + "\n".join(f"  • <code>{a}</code>" for a in failed_wallets[:10])
-            + (f"\n  ... và {len(failed_wallets)-10} ví khác" if len(failed_wallets) > 10 else "")
-            + f"\n\n⚠️ Kết quả vòng này có thể thiếu sót!"
+            f"Không quét được <b>{len(failed_wallets)} ví</b> sau 10 lần retry.\n"
+            f"⚠️ Kết quả vòng này có thể thiếu sót!"
         )
         send_telegram(tg_token, tg_chat, err_msg)
-        add_log(f"⚠️ {len(failed_wallets)} ví lỗi RPC sau 10 lần retry", "warning")
+        add_log(f"⚠️ {len(failed_wallets)} ví lỗi RPC", "warning")
 
+    # So sánh với snapshot BAN ĐẦU (không update khi tăng — giữ mốc gốc)
     increased    = []
     new_snapshot = dict(snapshot)
 
@@ -179,10 +179,10 @@ def run_monitor_cycle():
         diff    = new_bal - old_bal
 
         if diff > 0.0001:
-            stt = idx.get(addr, "?")
-            increased.append((stt, addr, old_bal, new_bal, diff))
-
+            # KHÔNG update snapshot — giữ mốc gốc cố định
+            increased.append(diff)
         elif new_bal < old_bal:
+            # Số dư giảm → cập nhật snapshot xuống mức mới
             new_snapshot[addr] = new_bal
 
     save_snapshot(new_snapshot)
@@ -195,26 +195,61 @@ def run_monitor_cycle():
             state["stats"]["alerts_total"] += len(increased)
 
     if increased:
-        increased.sort(key=lambda x: x[0])
-        total_usdt = sum(d for _, _, _, _, d in increased)
-        lines = [
-            f"  <b>#{stt}</b> — <code>{addr}</code>\n"
-            f"       +{diff:,.4f} {symbol}  ({old_bal:,.4f} → {new_bal:,.4f})"
-            for stt, addr, old_bal, new_bal, diff in increased
-        ]
+        total_amount = sum(increased)
+        avg_amount   = total_amount / len(increased)
+
+        # ─── Gom nhóm theo mức tăng (số nguyên) ─────────────
+        # 1u  : 0-<1 USDT
+        # 2u  : 1-<2 USDT
+        # 3u  : 2-<3 USDT
+        # 4u  : 3-<4 USDT
+        # 5u  : 4-<5 USDT
+        # ≥6u : ≥5 USDT
+        buckets = [[], [], [], [], [], []]
+        for diff in increased:
+            if diff < 1:
+                buckets[0].append(diff)
+            elif diff < 2:
+                buckets[1].append(diff)
+            elif diff < 3:
+                buckets[2].append(diff)
+            elif diff < 4:
+                buckets[3].append(diff)
+            elif diff < 5:
+                buckets[4].append(diff)
+            else:
+                buckets[5].append(diff)
+
+        labels = ["1u", "2u", "3u", "4u", "5u", "≥6u"]
+
+        # Build các dòng phân bố — chỉ hiện nhóm có ví, ẩn nhóm rỗng
+        bucket_lines = []
+        for label, bucket in zip(labels, buckets):
+            if bucket:
+                count = len(bucket)
+                bsum  = sum(bucket)
+                bucket_lines.append(
+                    f"   • <b>{label:<4}</b>: {count:>3} ví  "
+                    f"(+{bsum:,.2f} {symbol})"
+                )
+
         msg = (
             f"💰 <b>{symbol} TĂNG — Vòng #{cycle}</b>\n"
             f"🕐 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
-            + "\n\n".join(lines)
-            + f"\n\n─────────────────\n"
-            f"📊 <b>Tổng kết:</b>\n"
+            f"📊 <b>Tổng quan:</b>\n"
             f"   • Số ví tăng: <b>{len(increased)}/{len(wallets)} ví</b>\n"
-            f"   • Tổng {symbol} tăng: <b>+{total_usdt:,.4f} {symbol}</b>"
+            f"   • Tổng tăng: <b>+{total_amount:,.2f} {symbol}</b>\n"
+            f"   • Trung bình: <b>+{avg_amount:,.2f} {symbol}/ví</b>\n"
+            f"─────────────────\n"
+            f"📈 <b>Phân bố mức tăng:</b>\n"
+            + "\n".join(bucket_lines)
         )
+
         send_telegram(tg_token, tg_chat, msg)
-        add_log(f"✅ {len(increased)} ví tăng — tổng +{total_usdt:,.4f} {symbol}", "success")
+        add_log(f"✅ {len(increased)} ví tăng — tổng +{total_amount:,.2f} {symbol}", "success")
     else:
         add_log(f"Vòng #{cycle} xong ({elapsed:.1f}s) — không có ví nào tăng", "info")
+
 # ─── SCHEDULER ───────────────────────────────────────────────────────────────
 
 scheduler = BackgroundScheduler(daemon=True)
